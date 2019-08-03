@@ -15,11 +15,11 @@ def calibrate_camera():
     obj_points = [] # 3d pt in real world space
     img_points = [] # 2d pts in image plane
 
-    images = glob.glob('IMG_*.jpg')
+    images = glob.glob('Calibration Images/IMG_*.jpg')
     for image in images:
         print("INFO: Searching through images")
         img = cv2.imread(image)
-        img = cv2.resize(img, (0, 0), fx=0.4, fy=0.4)
+        #img = cv2.resize(img, (0, 0), fx=0.4, fy=0.4)
         gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
 
         # find the chess board corners
@@ -58,6 +58,12 @@ def calibrate_camera():
 
     new_dst = dst[y:y+h, x:x+w]
     cv2.imwrite('calibration_result.png',dst)
-    return camera_matrix, distortion_coeff, new_camera_mtx
+    np.save("camera_matrix_orig.npy", camera_matrix)
+    np.save("camera_dist_coeff.npy", distortion_coeff)
+    np.save("camera_matrix_new.npy", new_camera_mtx)
+    print("Camera Matrix:", camera_matrix)
+    print("distortion Coeff:", distortion_coeff)
+    print("New camera matrix:", new_camera_mtx)
+    #return camera_matrix, distortion_coeff, new_camera_mtx
 
 #calibrate_camera()
