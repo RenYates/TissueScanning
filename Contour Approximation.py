@@ -174,14 +174,16 @@ def create_contour_mask(img, cnts):
     return mask
 
 def find_corners(input_image, input_contours):
-    height, width = input_image.shape
+    height, width, _ = input_image.shape
+    bw_input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
     image_area = height*width
+    corners_image = input_image.copy()
     # search for the slide contour through the list of contours
     for contour in input_contours:
         size = cv2.contourArea(contour)
         # if the contour is of reasonable size (the slide contour) then create a mask
         if size > image_area/10:
-            mask = create_contour_mask(input_image, contour)
+            mask = create_contour_mask(bw_input_image, contour)
     #cv2.imshow('contours mask', mask)
     # find all non-zero points in the form [x,y] (column, row)
     slide_points = cv2.findNonZero(mask)
@@ -205,10 +207,10 @@ def find_corners(input_image, input_contours):
 
     # plot the found points onto the mask image
     for point in points:
-        cv2.circle(input_image, (point[0], point[1]), 5, (0, 255, 255), -1)
+        cv2.circle(corners_image, (point[0], point[1]), 10, (0, 255, 255), -1)
 
     #cv2.imshow('mask w/ corners', input_image)
-    cv2.imwrite('calculated_corners.jpg',input_image)
+    cv2.imwrite('calculated_corners.jpg', corners_image)
     #cv2.waitKey()
     #cv2.destroyAllWindows()
     return np.asarray(points)
@@ -292,12 +294,12 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
     image = cv2.undistort(image, orig_camera_matrix, distortion_coeff, None, new_camera_mtx)
     # display and save undistorted image
     #cv2.imshow('undistorted',image)
-    #cv2.imwrite('undistorted.jpg',image)
+    cv2.imwrite('undistorted.jpg',image)
     #cv2.waitKey()
     #cv2.destroyAllWindows()
 
     # Set the step size to 50 micrometer (0.05mm) (1000 um = 1mm)
-    step_size_microm = 500
+    # step_size_microm = 500
     # Set the slide width to 25mm (25000 micrometer)
     slide_microm_width = 25000
     # set the slide height to 75mm (75000 micrometer)
@@ -307,13 +309,14 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
 
     # covert image to greyscale
     img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+    cv2.imwrite("image_black_and_white.jpg", img)
     #cv2.imshow('image', img)
     #cv2.waitKey()
     #cv2.destroyAllWindows()
 
     # calculate the threshold
     _, threshold = cv2.threshold(img, 1, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    cv2.imwrite("image_threshold.jpg", threshold)
 
     #cv2.imshow('threshold',threshold)
     #cv2.imshow('inv_threshold',inv_threshold)
@@ -321,28 +324,25 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
     # Find contour of the tissue slide
     contours, hierarchy = cv2.findContours(threshold, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     # Draw contours onto display image
-    #contours_copy = image.copy()
-    #cv2.drawContours(contours_copy, contours, -1, (0,0,0), 2)
-
-    #cv2.imshow('Contours',contours_copy)
-    #cv2.waitKey()
-    #cv2.destroyAllWindows()
+    contours_copy = image.copy()
 
     # calculate the corners of the slide
-    corners = find_corners(threshold, contours)
+    corners = find_corners(contours_copy, contours)
     print(corners)
 
     # crop the photo to size of the slide using the min and max x and y corner points
     crop_img = image[np.amin(corners[:,1]):np.amax(corners[:,1]), np.amin(corners[:,0]):np.amax(corners[:,0])]
+    cv2.imwrite("cropped_image.jpg", crop_img)
 
     # increase contrast of image to brighten tissue sample
-    crop_img = correct_contrast_brightness(crop_img, 2, 0)
+    crop_img_contrast = correct_contrast_brightness(crop_img, 2, 0)
+    cv2.imwrite("cropped_contrast.jpg", crop_img_contrast)
 
     # convert image to greyscale
-    grey_crop = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+    grey_crop = cv2.cvtColor(crop_img_contrast, cv2.COLOR_BGR2GRAY)
 
     # cv2.imshow('cropped image',grey_crop)
-    cv2.imwrite('cropped_photo.jpg', crop_img)
+    cv2.imwrite('cropped_image_grey.jpg', grey_crop)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
     #
@@ -372,6 +372,10 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
 
     # find the contour of the tissue on the slide
     tissue_contour = find_tissue_contour(slide_pixel_width, slide_pixel_height, slide_threshold)
+    tissue_contour_image = cv2.resize(crop_img.copy(), (0, 0), fx=scaling_factor, fy=scaling_factor)
+    cv2.drawContours(tissue_contour_image, tissue_contour, -1, (0,255,255), 7)
+    cv2.imwrite("tissue_contour.jpg", tissue_contour_image)
+
 
     # generate a mask of the tissue contour
     tissue_mask = create_contour_mask(slide_threshold, tissue_contour)
@@ -384,27 +388,27 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
 
     # calculate the linear scanning coordinates in pixels
     scan_pixel_img_coord, grid_pixel_img_coord = imaging(tissue_mask, tissue_height, tissue_width, pixels_per_micrometer, step_size_microm, top_left_pt[0], top_left_pt[1])
-    print("scan pixel image coordinates:\n", scan_pixel_img_coord)
+
+    # plot the grid coordinates in red and the scan_pixel coordinates in green for a visualization
+    grid_vs_contour_lines = cv2.resize(crop_img.copy(), (0, 0), fx=scaling_factor, fy=scaling_factor)
+    for grid_point in grid_pixel_img_coord:
+        cv2.circle(grid_vs_contour_lines, tuple(grid_point), 1, (0,0,255))
+    for contour_point in scan_pixel_img_coord:
+        cv2.circle(grid_vs_contour_lines, tuple(contour_point), 1, (0, 255, 0))
+    cv2.imwrite("resulting_points.jpg", grid_vs_contour_lines)
     # convert from image coordinate system to slide coordinate system
     scan_pixel_slide_coord = convert_to_slide_coordinate(scan_pixel_img_coord, corners)
     # convert from pixels to micrometers (divide the pixel coordinates matrix by pixels_per_micrometer conversion to find micrometers)
     scan_microm_slide_coord = np.divide(scan_pixel_slide_coord, pixels_per_micrometer)
-    print("Scan microm coordinates:\n", scan_microm_slide_coord)
 
     # calculate the size of scan pixels and grid pixels to calculate percentage change/difference
     contour_pixel_lines_rows = scan_pixel_img_coord.shape[0]
-    print("Contour_pixel_lines_rows:", contour_pixel_lines_rows)
-    print("contour pixels shape: ", scan_pixel_img_coord.shape)
     grid_pixel_lines_rows = grid_pixel_img_coord.shape[0]
-    print("Grid pixel lines rows: ", grid_pixel_lines_rows)
-    print("grid pixels shape: ", grid_pixel_img_coord.shape)
 
     # calculate the difference in size between grid scanning and contour scanning to show improvement
     percent_difference = ((grid_pixel_lines_rows - contour_pixel_lines_rows)/
                           ((grid_pixel_lines_rows+contour_pixel_lines_rows)/2)) * 100
-    print("percent difference :", percent_difference)
     percent_change = ((grid_pixel_lines_rows - contour_pixel_lines_rows)/grid_pixel_lines_rows) * 100
-    print("Percent change: ", percent_change)
 
     return percent_change, percent_difference
 
@@ -438,6 +442,19 @@ def gather_results():
     print("Average Percent Change:", average_percent_change)
     print("Average Percent Difference:", average_percent_difference)
 
-gather_results()
+def example_run():
+    old_camera_matrix_file = "camera_matrix_orig.npy"
+    camera_distortion_coeff_file = "camera_dist_coeff.npy"
+    new_camera_matrix_file = "camera_matrix_new.npy"
 
+    image_file = "Tissue Images/tissue20_2.jpg"
+
+    # Set the step size to 50 micrometer (0.05mm) (1000 um = 1mm)
+    step_size_microm = 50
+
+    _, _ = scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera_matrix_file, image_file, step_size_microm)
+
+example_run()
+
+#gather_results()
 
