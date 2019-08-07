@@ -207,7 +207,7 @@ def find_corners(input_image, input_contours):
 
     # plot the found points onto the mask image
     for point in points:
-        cv2.circle(corners_image, (point[0], point[1]), 10, (0, 255, 255), -1)
+        cv2.circle(corners_image, (point[0], point[1]), 20, (0, 255, 255), -1)
 
     #cv2.imshow('mask w/ corners', input_image)
     cv2.imwrite('calculated_corners.jpg', corners_image)
@@ -216,17 +216,24 @@ def find_corners(input_image, input_contours):
     return np.asarray(points)
 
 def find_tissue_contour(slide_width, slide_height, slide_threshold):
+    # calculate size of photo
+    height, width = slide_threshold.shape
+    print("Height of slide:", height)
+    print("Width of slide:", width)
     # calculate the area of the slide
     slide_area = slide_width*slide_height
     # threshold the slide image
     tissue_contours, hierarchy = cv2.findContours(slide_threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     for contour in tissue_contours:
-        # check that the contour area is within this set boundary
-        if slide_area * 0.004 < cv2.contourArea(contour) < slide_area * 0.3:
-            #cv2.drawContours(crop_img_copy, contour, -1, (0, 255, 255), 2)
-            #print(cv2.contourArea(contour))
-            tissue_contour = contour
-            return tissue_contour
+        # check if contour is touching the border of the image (tissue will not be placed on edge of slide)
+        bounding_x, bounding_y, bounding_width, bounding_height = cv2.boundingRect(contour)
+        if bounding_x >= 0 and bounding_y >= 0 and bounding_x+bounding_width <= width-1 and bounding_y+bounding_height <= height-1:
+            # check that the contour area is within this set boundary
+            if slide_area * 0.004 < cv2.contourArea(contour) < slide_area * 0.2:
+                #cv2.drawContours(crop_img_copy, contour, -1, (0, 255, 255), 2)
+                #print(cv2.contourArea(contour))
+                tissue_contour = contour
+                return tissue_contour
 
 def calc_tissue_size(tissue_contour):
     # calculate relative size of tissue contour using extreme pts and size of slide
@@ -373,7 +380,7 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
     # find the contour of the tissue on the slide
     tissue_contour = find_tissue_contour(slide_pixel_width, slide_pixel_height, slide_threshold)
     tissue_contour_image = cv2.resize(crop_img.copy(), (0, 0), fx=scaling_factor, fy=scaling_factor)
-    cv2.drawContours(tissue_contour_image, tissue_contour, -1, (0,255,255), 7)
+    cv2.drawContours(tissue_contour_image, tissue_contour, -1, (0, 255, 255), 15)
     cv2.imwrite("tissue_contour.jpg", tissue_contour_image)
 
 
@@ -406,11 +413,9 @@ def scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera
     grid_pixel_lines_rows = grid_pixel_img_coord.shape[0]
 
     # calculate the difference in size between grid scanning and contour scanning to show improvement
-    percent_difference = ((grid_pixel_lines_rows - contour_pixel_lines_rows)/
-                          ((grid_pixel_lines_rows+contour_pixel_lines_rows)/2)) * 100
-    percent_change = ((grid_pixel_lines_rows - contour_pixel_lines_rows)/grid_pixel_lines_rows) * 100
+    percent_decrease = ((grid_pixel_lines_rows - contour_pixel_lines_rows)/grid_pixel_lines_rows) * 100
 
-    return percent_change, percent_difference
+    return percent_decrease, grid_pixel_lines_rows, contour_pixel_lines_rows
 
     #cv2.waitKey(0)
     #cv2.destroyAllWindows()
@@ -424,37 +429,38 @@ def gather_results():
     step_size_microm = 50
 
     # initialize variables
-    total_percent_change = 0
-    total_percent_difference = 0
+    total_percent_decrease = 0
     total_num_photos = 0
+    total_grid_pts = 0
+    total_contour_pts = 0
 
     images = glob.glob('Tissue Images/*')
     for image_file in images:
         print("Image File:", image_file)
         total_num_photos += 1
-        percent_change, percent_difference = scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera_matrix_file, image_file, step_size_microm)
-        total_percent_change += percent_change
-        total_percent_difference += percent_difference
-    average_percent_change = total_percent_change/total_num_photos
-    average_percent_difference = total_percent_difference/total_num_photos
+        percent_decrease, num_grid_pts, num_contour_pts = scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera_matrix_file, image_file, step_size_microm)
+        total_percent_decrease += percent_decrease
+        total_grid_pts += num_grid_pts
+        total_contour_pts += num_contour_pts
+    average_percent_change = total_percent_decrease/total_num_photos
 
     print("\n\n\n--------------------------------\n\n\n")
-    print("Average Percent Change:", average_percent_change)
-    print("Average Percent Difference:", average_percent_difference)
+    print("Total number of photos:", total_num_photos)
+    print("Average Percent Decrease:", average_percent_change)
 
 def example_run():
     old_camera_matrix_file = "camera_matrix_orig.npy"
     camera_distortion_coeff_file = "camera_dist_coeff.npy"
     new_camera_matrix_file = "camera_matrix_new.npy"
 
-    image_file = "Tissue Images/tissue20_2.jpg"
+    image_file = "Tissue Images/tissue13_4.jpg"
 
     # Set the step size to 50 micrometer (0.05mm) (1000 um = 1mm)
     step_size_microm = 50
 
-    _, _ = scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera_matrix_file, image_file, step_size_microm)
+    _, _, _ = scan_tissue(old_camera_matrix_file, camera_distortion_coeff_file, new_camera_matrix_file, image_file, step_size_microm)
 
-example_run()
+#example_run()
 
-#gather_results()
+gather_results()
 
