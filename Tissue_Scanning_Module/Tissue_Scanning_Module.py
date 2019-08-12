@@ -4,7 +4,28 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
-import cv2
+
+scriptPath = os.path.dirname(os.path.abspath(__file__))
+try:
+  # the module is in the python path
+  import cv2
+except ImportError:
+  # for the build directory, load from the file
+  import imp, platform
+  if platform.system() == 'Windows':
+    cv2File = 'cv2.pyd'
+    cv2Path = '../../../../OpenCV-build/lib/Release/' + cv2File
+  else:
+    cv2File = 'cv2.so'
+    cv2Path = '../../../../OpenCV-build/lib/' + cv2File
+  cv2Path = os.path.abspath(os.path.join(scriptPath, cv2Path))
+  # in the build directory, this path should exist, but in the installed extension
+  # it should be in the python path, so only use the short file name
+  if not os.path.isfile(cv2Path):
+    print('Full path not found: ',cv2Path)
+    cv2Path = cv2File
+  print('Loading cv2 from ',cv2Path)
+  cv2 = imp.load_dynamic('cv2', cv2File)
 import math
 import time
 
@@ -81,7 +102,6 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
 
   def onCalibrateButton(self):
     pass
-    #self.logic.calibrate_camera()
 
   def onCameraSelect(self):
     self.ui.pictureButton.enabled = self.ui.cameraInputSelector.currentNode()
@@ -93,7 +113,7 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
     self.logic.setImage(image)
     print("Picture taken")
     self.ui.contourButton.enabled = self.ui.pictureButton.enabled
-    self.logic.find_slide_corners(image)
+    #self.logic.find_slide_corners(image)
     #enableScreenshotsFlag = self.ui.enableScreenshotsFlagCheckBox.checked
     #imageThreshold = self.ui.imageThresholdSliderWidget.value
     #self.logic.run(self.ui.inputSelector.currentNode(), imageThreshold, enableScreenshotsFlag)
@@ -123,29 +143,34 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
 
     self.cameraInputNode = None
-    self.camera_matrix = np.array([3.1251275474302643e+03, 0., 6.4676296824333906e+02, 0.,
-       3.6910255437248684e+03, 3.3437306108288692e+02, 0., 0., 1.])
-    self.distortion_coeff = 0
+    self.camera_matrix = np.array([ 3.8123219904322709e+03, 0., 6.3391315731427699e+02, 0.,
+       3.8123219904322709e+03, 3.5474187950489744e+02, 0., 0., 1. ]).reshape(3, 3)
+    self.distortion_coeff = np.array([ 2.7835229002762483e+00, -2.8185054313642092e+02,
+       -1.2789573607286241e-02, -9.9337493609380750e-04,
+       7.4270939329040812e+03 ])
     self.new_camera_mtx = []
     self.image = None
     self.tissue_contour = None
     self.tissue_mask = None
-    # Set the slide width to 25mm (25000 micrometer)
-    self.slide_microm_width = 25000
-    self.slide_mm_width = 25
-    # set the slide height to 75mm (75000 micrometer)
-    self.slide_microm_height = 75000
-    self.slide_mm_height = 75
-    # set the step size to 500 micrometers
-    self.step_size_microm = 500
+    # Set the slide width to 75mm (75000 micrometer)
+    self.slide_microm_width = 75000
+    self.slide_mm_width = 75
+    # set the slide height to 25mm (25000 micrometer)
+    self.slide_microm_height = 25000
+    self.slide_mm_height = 25
+    # set the step size to 50 micrometers
+    self.step_size_microm = 50 # will change with user input in spinbox
     # set robot resolution to 50 micrometers
     self.robot_resolution = 50
     self.scaling_factor = 0
     self.pixels_per_micrometer = 0
     self.corners = []
+    self.vtk_aruco_matrix = []
+    self.numpy_aruco_matrix = []
     self.aruco_center_mm = []
     self.aruco_center_pixels = []
-    self.aruco_corner_x_y_dist = 18
+    self.aruco_corner_x_dist = 20
+    self.aruco_corner_y_dist = 18
 
 
 
@@ -167,93 +192,46 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
   def setNew_Camera_Matrix(self, new_camera_mtx):
     self.new_camera_mtx = new_camera_mtx
 
-  # def calibrate_camera(self):
-  #   print("Beginning Camera Calibration\n")
-  #   # set the required number of good photos taken
-  #   required_num_photos = 15
-  #   current_num_photos = 0
-  #
-  #   # termination criteria
-  #   criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-  #
-  #   # prepare object points, like (0,0,0), (1,0,0), ... (6,5,0)
-  #   object_points = np.zeros((7 * 7, 3), np.float32)
-  #   object_points[:, :2] = np.mgrid[0:7, 0:7].T.reshape(-1, 2)
-  #
-  #   # Arrays to store object points and image points from all the images
-  #   obj_points = []  # 3d pt in real world space
-  #   img_points = []  # 2d pts in image plane
-  #
-  #   find_photos = True
-  #   # take images
-  #   print("INFO: Searching for chessboard")
-  #   while find_photos:
-  #     # take a picture of the current image
-  #     img = self.takePicture()
-  #     print("INFO: Image taken")
-  #     # img = cv2.resize(img, (0, 0), fx=0.4, fy=0.4)
-  #     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-  #
-  #     # find the chess board corners
-  #     ret, corners = cv2.findChessboardCorners(gray, (7, 7), None)
-  #
-  #     # If found, add object points, image points (after refining them)
-  #     if ret == True:
-  #       print("INFO: Chessboard found, move chessboard to new position")
-  #       current_num_photos += 1
-  #       obj_points.append(object_points)
-  #
-  #       corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-  #       img_points.append(corners2)
-  #
-  #       time.sleep(3)
-  #       print("INFO: Searching for chessboard")
-  #
-  #     if current_num_photos == required_num_photos:
-  #       find_photos = False
-  #
-  #   print("Image collection completed, determining distortion and camera matrix")
-  #   ret, camera_matrix, distortion_coeff, rotation_vec, translation_vec = cv2.calibrateCamera(obj_points, img_points,
-  #                                                                                             gray.shape[::-1], None,
-  #                                                                                             None)
-  #   h, w = img.shape[:2]
-  #   new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeff, (w, h), 1, (w, h))
-  #   # undistort the image
-  #   dst = cv2.undistort(img, camera_matrix, distortion_coeff, None, new_camera_mtx)
-  #
-  #   # crop the image
-  #
-  #   x, y, w, h = roi
-  #
-  #   new_dst = dst[y:y + h, x:x + w]
-  #   cv2.imwrite('calibration_result.png', dst)
-  #   #np.save("camera_matrix_orig.npy", camera_matrix)
-  #   self.setCamera_Matrix(camera_matrix)
-  #   #np.save("camera_dist_coeff.npy", distortion_coeff)
-  #   self.setDistortion_Coeff(distortion_coeff)
-  #   np.save("camera_matrix_new.npy", new_camera_mtx)
-  #   self.setNew_Camera_Matrix(new_camera_mtx)
-  #   print("Calibration complete.")
-  #   # return camera_matrix, distortion_coeff, new_camera_mtx
-
   def takePicture(self):
     # get the name of the selected camera node
     #name = self.cameraInputNode
-    # take screenshot of image and read it as an array
+    # take screenshot of image and read it as an array & save the Aruco marker position
     image = slicer.util.array("Image_Image")
+    aruco_transform = slicer.util.getNode("Marker5ToTracker")
     image = image[0]
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    aruco_transform = slicer.util.getNode("Marker7ToTracker")
     vtk_aruco_matrix = vtk.vtkMatrix4x4()
     aruco_transform.GetMatrixTransformToParent(vtk_aruco_matrix)
+    self.vtk_aruco_matrix = vtk_aruco_matrix
+    self.numpy_aruco_matrix = np.array(
+      [vtk_aruco_matrix.GetElement(0, 0), vtk_aruco_matrix.GetElement(0, 1), vtk_aruco_matrix.GetElement(0, 2), vtk_aruco_matrix.GetElement(0, 3),
+       vtk_aruco_matrix.GetElement(1, 0), vtk_aruco_matrix.GetElement(1, 1), vtk_aruco_matrix.GetElement(1, 2), vtk_aruco_matrix.GetElement(1, 3),
+       vtk_aruco_matrix.GetElement(2, 0), vtk_aruco_matrix.GetElement(2, 1), vtk_aruco_matrix.GetElement(2, 2), vtk_aruco_matrix.GetElement(2, 3),
+       vtk_aruco_matrix.GetElement(2, 0), vtk_aruco_matrix.GetElement(2, 1), vtk_aruco_matrix.GetElement(2, 2), vtk_aruco_matrix.GetElement(2, 3)]).reshape(4, 4)
     self.aruco_center_mm = np.array([vtk_aruco_matrix.GetElement(0,3), vtk_aruco_matrix.GetElement(1, 3), vtk_aruco_matrix.GetElement(2, 3)])
+    print("Aruco mm", self.aruco_center_mm)
     normalize_aruco = np.array([self.aruco_center_mm[0]/self.aruco_center_mm[2], self.aruco_center_mm[1]/self.aruco_center_mm[2], 1]).reshape(3, 1)
-    camera_matrix = self.camera_matrix.reshape(3, 3)
+    camera_matrix = self.camera_matrix
     self.aruco_center_pixels = np.dot(camera_matrix, normalize_aruco)
-    print(self.aruco_center_pixels)
+    print("aruco pixels",self.aruco_center_pixels)
+    image = self.undistort_camera(image)
     cv2.circle(image, (self.aruco_center_pixels[0],self.aruco_center_pixels[1]), 5, (255, 0, 0), -1)
     cv2.imwrite("C:/Users/laure/PycharmProjects/TissueScanning/center point.jpg", image)
     return image
+
+  def undistort_camera(self, image):
+    h, w = image.shape[:2]
+
+    new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(self.camera_matrix, self.distortion_coeff, (w, h), 1, (w, h))
+    undistorted_image = cv2.undistort(image, self.camera_matrix, self.distortion_coeff, None, new_camera_mtx)
+
+    # crop the image
+
+    #x, y, w, h = roi
+
+    #undistorted_image = undistorted_image[y:y + h, x:x + w]
+    return undistorted_image
+
 
   def midpoint(self, ptA, ptB):
     return ((ptA[0] + ptB[0]) / 2, (ptA[1] + ptB[1]) / 2)
@@ -378,14 +356,33 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     # cv2.imshow('mask', mask)
     return mask
 
+  def calculate_aruco_marker_rotation_mtx(self):
+    aruco_origin_x_direction_vector = np.array([1,0,0,0]).reshape(4,1)
+    aruco_origin_y_direction_vector = np.array([0,1,0,0]).reshape(4,1)
+    aruco_origin_z_direction_vector = np.array([0,0,1,0]).reshape(4,1)
+    transformation_matrix = self.vtk_aruco_matrix
+    camera_aruco_x_vector = transformation_matrix.MultiplyPoint(aruco_origin_x_direction_vector)
+    camera_aruco_y_vector = transformation_matrix.MultiplyPoint(aruco_origin_y_direction_vector)
+    camera_aruco_z_vector = transformation_matrix.MultiplyPoint(aruco_origin_z_direction_vector)
+    norm_camera_aruco_x = np.array([camera_aruco_x_vector[0], camera_aruco_x_vector[1], 0]).reshape(3, 1)
+    norm_camera_aruco_y = np.array([camera_aruco_y_vector[0], camera_aruco_y_vector[1], 0]).reshape(3, 1)
+    norm_camera_aruco_z = np.array([camera_aruco_z_vector[0], camera_aruco_z_vector[1], 0]).reshape(3, 1)
+    rotation_matrix = np.array(np.hstack([norm_camera_aruco_x, norm_camera_aruco_y, norm_camera_aruco_z]))
+    return rotation_matrix
+
+
   def find_slide_corners(self, input_image):
-    top_left_mm = [self.aruco_center_mm[0] - self.aruco_corner_x_y_dist, self.aruco_center_mm[1] + self.aruco_corner_x_y_dist, self.aruco_center_mm[2]]
-    print(top_left_mm)
-    top_right_mm = [top_left_mm[0], top_left_mm[1] + self.slide_mm_width, top_left_mm[2]]
-    print(top_right_mm)
-    bottom_left_mm = [top_left_mm[0] - self.slide_mm_height, top_left_mm[1], top_left_mm[2]]
-    bottom_right_mm = [top_left_mm[0] - self.slide_mm_height, top_left_mm[1] + self.slide_mm_width, top_left_mm[2]]
+    top_right_relative_aruco = [self.aruco_corner_x_dist, -1*self.aruco_corner_y_dist, 0, 1]
+    top_left_relative_aruco = [self.aruco_corner_x_dist, -1*(self.aruco_corner_y_dist + self.slide_mm_width), 0, 1]
+    bottom_right_relative_aruco = [self.aruco_corner_x_dist + self.slide_mm_height, -1*self.aruco_corner_y_dist, 0, 1]
+    bottom_left_relative_aruco = [self.aruco_corner_x_dist + self.slide_mm_height, -1*(self.aruco_corner_y_dist + self.slide_mm_width), 0, 1]
+    top_left_mm = np.array(self.vtk_aruco_matrix.MultiplyPoint(top_left_relative_aruco))
+    top_right_mm = np.array(self.vtk_aruco_matrix.MultiplyPoint(top_right_relative_aruco))
+    bottom_left_mm = np.array(self.vtk_aruco_matrix.MultiplyPoint(bottom_left_relative_aruco))
+    bottom_right_mm = np.array(self.vtk_aruco_matrix.MultiplyPoint(bottom_right_relative_aruco))
+    # normalize mm points to convert to pixels
     norm_top_left_mm = np.array([top_left_mm[0]/top_left_mm[2], top_left_mm[1]/top_left_mm[2], 1]).reshape(3, 1)
+    #print(norm_top_left_mm)
     norm_top_right_mm = np.array([top_right_mm[0]/top_right_mm[2], top_right_mm[1]/top_right_mm[2], 1]).reshape(3, 1)
     norm_bottom_left_mm = np.array([bottom_left_mm[0]/bottom_left_mm[2], bottom_left_mm[1]/bottom_left_mm[2], 1]).reshape(3, 1)
     norm_bottom_right_mm = np.array([bottom_right_mm[0]/bottom_right_mm[2], bottom_right_mm[1]/bottom_right_mm[2], 1]).reshape(3, 1)
@@ -394,57 +391,13 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     top_right_pixels = np.dot(camera_matrix, norm_top_right_mm)
     bottom_left_pixels = np.dot(camera_matrix, norm_bottom_left_mm)
     bottom_right_pixels = np.dot(camera_matrix, norm_bottom_right_mm)
-    print(top_left_pixels)
+    print("top left pixels:", top_left_pixels)
     cv2.circle(input_image, (top_left_pixels[0], top_left_pixels[1]), 5, (255, 0, 0), -1)
     cv2.circle(input_image, (top_right_pixels[0], top_right_pixels[1]), 5, (0, 255, 0), -1)
     cv2.circle(input_image, (bottom_left_pixels[0], bottom_left_pixels[1]), 5, (0, 0, 255), -1)
     cv2.circle(input_image, (bottom_right_pixels[0], bottom_right_pixels[1]), 5, (0, 255, 255), -1)
     cv2.imwrite("C:/Users/laure/PycharmProjects/TissueScanning/center point.jpg", input_image)
     return np.array([top_left_pixels.reshape(1,3), bottom_right_pixels.reshape(1,3), bottom_left_pixels.reshape(1,3), top_right_pixels.reshape(1,3)])
-
-
-
-  # def find_corners(self, input_image, input_contours):
-  #   height, width, _ = input_image.shape
-  #   bw_input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
-  #   image_area = height * width
-  #   corners_image = input_image.copy()
-  #   # search for the slide contour through the list of contours
-  #   for contour in input_contours:
-  #     size = cv2.contourArea(contour)
-  #     # if the contour is of reasonable size (the slide contour) then create a mask
-  #     if size > image_area / 10:
-  #       mask = self.create_contour_mask(bw_input_image, contour)
-  #   # cv2.imshow('contours mask', mask)
-  #   # find all non-zero points in the form [x,y] (column, row)
-  #   slide_points = cv2.findNonZero(mask)
-  #   # convert the points into a matrix to do matrix multiplication
-  #   matrix_slide_pts = np.asmatrix(slide_points)
-  #   # 4 corners will be: min(x+y), min(-x-y), min(x-y), min(-x+y)
-  #   # build an array with the correct + and - signs for multiplication
-  #   multi_matrix = np.array([[1, -1, 1, -1], [1, -1, -1, 1]])
-  #   # multiply the slide pts matrix to the multi_matrix
-  #   result = matrix_slide_pts.dot(multi_matrix)
-  #   # find the row index of the min value in each column in the result matrix
-  #   # column 1 is top left, column 2 is bottom right, column 3 is bottom left, column 4 is top right
-  #   indexes = []
-  #   for column in range(result.shape[1]):
-  #     indexes.append(np.argmin(result[:, column]))
-  #
-  #   # find the corresponding (x,y) coordinates for each min value index
-  #   points = []
-  #   for index in indexes:
-  #     points.append(slide_points[index][0])
-  #
-  #   # plot the found points onto the mask image
-  #   for point in points:
-  #     cv2.circle(corners_image, (point[0], point[1]), 5, (0, 255, 255), -1)
-  #
-  #   # cv2.imshow('mask w/ corners', input_image)
-  #   cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/calculated_corners.jpg', corners_image)
-  #   # cv2.waitKey()
-  #   # cv2.destroyAllWindows()
-  #   return np.asarray(points)
 
   def find_tissue_contour(self, slide_width, slide_height, slide_threshold, pixels_per_micrometer):
     # calculate size of photo
@@ -527,9 +480,6 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
   def determine_contour(self):
     print("contour determination started")
-
-    # undistort image using camera calibration matrices
-    #image = cv2.undistort(self.image, self.camera_matrix, self.distortion_coeff, None, self.new_camera_mtx)
 
     # covert image to greyscale
     img = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
@@ -629,10 +579,8 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
   def generate_scanning_pattern(self):
     tissue_width, tissue_height, top_left_pt = self.calc_tissue_size(self.tissue_contour)
-    print("tissue mask", self.tissue_mask)
 
     # calculate the linear scanning coordinates in pixels
-    print("self pixels per micrometer:", self.pixels_per_micrometer)
     scan_pixel_img_coord, grid_pixel_img_coord = self.imaging(self.tissue_mask, tissue_height, tissue_width,
                                                               self.pixels_per_micrometer, self.step_size_microm, top_left_pt[0],
                                                               top_left_pt[1])
@@ -647,6 +595,8 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     cv2.imshow("grid vs contour lines", grid_vs_contour_lines)
     # convert from image coordinate system to slide coordinate system
     scan_pixel_slide_coord = self.convert_to_slide_coordinate(scan_pixel_img_coord, self.corners)
+    print("scan_pixel_img_coord:", scan_pixel_img_coord)
+    print("scan_pixel_slide_coord:", scan_pixel_slide_coord)
     # convert from pixels to micrometers (divide the pixel coordinates matrix by pixels_per_micrometer conversion to find micrometers)
     scan_microm_slide_coord = np.divide(scan_pixel_slide_coord, self.pixels_per_micrometer)
 
