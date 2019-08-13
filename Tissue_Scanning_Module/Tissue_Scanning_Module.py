@@ -71,24 +71,72 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
     self.logic = Tissue_Scanning_ModuleLogic()
 
     # Load widget from .ui file (created by Qt Designer)
-    uiWidget = slicer.util.loadUI(self.resourcePath('UI/Tissue_Scanning_Module.ui'))
-    self.layout.addWidget(uiWidget)
-    self.ui = slicer.util.childWidgetVariables(uiWidget)
-
-    self.ui.cameraInputSelector.setMRMLScene(slicer.mrmlScene)
+    #uiWidget = slicer.util.loadUI(self.resourcePath('UI/Tissue_Scanning_Module.ui'))
+    #self.layout.addWidget(uiWidget)
+    #self.ui = slicer.util.childWidgetVariables(uiWidget)
+#
+# Parameters Area
+        #
+    CameraControlCollapsibleButton = ctk.ctkCollapsibleButton()
+    CameraControlCollapsibleButton.text = "Camera Control "
+    self.layout.addWidget(CameraControlCollapsibleButton)
+    CameraControlFormLayout = qt.QFormLayout(CameraControlCollapsibleButton)
+        #    
+    
+    #
+        # IGT Link Connector
+        #
+    self.inputSelector = slicer.qMRMLNodeComboBox()
+    self.inputSelector.nodeTypes = ["vtkMRMLIGTLConnectorNode"]
+    self.inputSelector.selectNodeUponCreation = False
+    self.inputSelector.addEnabled = False
+    self.inputSelector.removeEnabled = False
+    self.inputSelector.noneEnabled = False
+    self.inputSelector.showHidden = False
+    self.inputSelector.showChildNodeTypes = False
+    self.inputSelector.setMRMLScene(slicer.mrmlScene)
+    self.inputSelector.setToolTip("Connect to OpenIGTLink to control printer from module.")
+    CameraControlFormLayout.addRow("Connect to: ", self.inputSelector)
+    self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onCameraSelect)
+    
+    
+    #self.ui.cameraInputSelector.setMRMLScene(slicer.mrmlScene)
     #self.ui.outputSelector.setMRMLScene(slicer.mrmlScene)
 
     # set max and min values of step size microm
-    self.ui.stepSizeNumSpinBox.setMinimum(1)
-    self.ui.stepSizeNumSpinBox.setMaximum(10000)
-    self.ui.stepSizeNumSpinBox.setValue(50)
-
+    self.stepSizeNumSpinBox = qt.QDoubleSpinBox()
+    self.stepSizeNumSpinBox.setMinimum(1)
+    self.stepSizeNumSpinBox.setMaximum(10000)
+    self.stepSizeNumSpinBox.setValue(500)
+    CameraControlFormLayout.addRow("Step size (um) :", self.stepSizeNumSpinBox)
     # connections
-    self.ui.calibrateButton.connect('clicked(bool)', self.onCalibrateButton)
-    self.ui.pictureButton.connect('clicked(bool)', self.onPictureButton)
-    self.ui.contourButton.connect('clicked(bool)', self.onContourButton)
-    self.ui.scanningButton.connect('clicked(bool)', self.onScanningButton)
-    self.ui.cameraInputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onCameraSelect)
+    self.calibrateButton = qt.QPushButton("Calibrate Camera")
+    self.calibrateButton.connect('clicked(bool)', self.onCalibrateButton)
+    self.calibrateButton.enabled = True
+    CameraControlFormLayout.addRow(self.calibrateButton)
+
+
+    self.pictureButton = qt.QPushButton("Take Slide Picture")
+    self.pictureButton.connect('clicked(bool)', self.onPictureButton)
+    self.pictureButton.enabled = True
+    CameraControlFormLayout.addRow(self.pictureButton)
+
+    self.contourButton = qt.QPushButton("Determine Tissue Contour")
+    self.contourButton.connect('clicked(bool)', self.onContourButton)
+    self.contourButton.enabled = False
+    CameraControlFormLayout.addRow(self.contourButton)
+  
+    self.scanningButton = qt.QPushButton("Generate Scanning Pattern")
+    self.scanningButton.connect('clicked(bool)', self.onScanningButton)
+    self.scanningButton.enabled = False
+    CameraControlFormLayout.addRow(self.scanningButton)
+
+    self.testButton = qt.QPushButton("Gnew button")
+    self.testButton.connect('clicked(bool)', self.onTestButton)
+    self.testButton.enabled = True
+    CameraControlFormLayout.addRow(self.testButton)
+    
+    
     #self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onInputSelect)
 
     # Add vertical spacer
@@ -104,15 +152,15 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
     pass
 
   def onCameraSelect(self):
-    self.ui.pictureButton.enabled = self.ui.cameraInputSelector.currentNode()
-    self.ui.calibrateButton.enabled = self.ui.cameraInputSelector.currentNode()
-    self.logic.setCameraInputNode(self.ui.cameraInputSelector.currentNode())
+    self.pictureButton.enabled = self.inputSelector.currentNode()
+    self.calibrateButton.enabled = self.inputSelector.currentNode()
+    self.logic.setCameraInputNode(self.inputSelector.currentNode())
 
   def onPictureButton(self):
     image = self.logic.takePicture()
     self.logic.setImage(image)
     print("Picture taken")
-    self.ui.contourButton.enabled = self.ui.pictureButton.enabled
+    self.contourButton.enabled = self.pictureButton.enabled
     #self.logic.find_slide_corners(image)
     #enableScreenshotsFlag = self.ui.enableScreenshotsFlagCheckBox.checked
     #imageThreshold = self.ui.imageThresholdSliderWidget.value
@@ -120,11 +168,14 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
 
   def onContourButton(self):
     self.logic.determine_contour()
-    self.ui.scanningButton.enabled = self.ui.contourButton.enabled
+    self.scanningButton.enabled = self.contourButton.enabled
 
   def onScanningButton(self):
-    self.logic.setStepSizeMicrom(self.ui.stepSizeNumSpinBox.value)
+    self.logic.setStepSizeMicrom(self.stepSizeNumSpinBox.value)
     self.logic.generate_scanning_pattern()
+
+  def onTestButton(self):
+    self.logic.convert_array_to_fiducials()
 
 #
 # Tissue_Scanning_ModuleLogic
@@ -143,13 +194,14 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
 
     self.cameraInputNode = None
-    self.camera_matrix = np.array([ 3.8123219904322709e+03, 0., 6.3391315731427699e+02, 0.,
-       3.8123219904322709e+03, 3.5474187950489744e+02, 0., 0., 1. ]).reshape(3, 3)
-    self.distortion_coeff = np.array([ 2.7835229002762483e+00, -2.8185054313642092e+02,
-       -1.2789573607286241e-02, -9.9337493609380750e-04,
-       7.4270939329040812e+03 ])
+    self.camera_matrix = np.array([ 3.6014714403014150e+03, 0., 6.4116609481666580e+02, 0.,
+       3.6014714403014150e+03, 3.5745577227329079e+02, 0., 0., 1. ]).reshape(3, 3)
+    self.distortion_coeff = np.array([ 2.5485041095855401e+00, -2.1526716048332378e+02,
+       -1.6250023598792348e-02, 5.7989385007653493e-04,
+       4.8914876856666788e+03 ])
     self.new_camera_mtx = []
     self.image = None
+    self.crop_img = None
     self.tissue_contour = None
     self.tissue_mask = None
     # Set the slide width to 75mm (75000 micrometer)
@@ -159,9 +211,9 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     self.slide_microm_height = 25000
     self.slide_mm_height = 25
     # set the step size to 50 micrometers
-    self.step_size_microm = 50 # will change with user input in spinbox
-    # set robot resolution to 50 micrometers
-    self.robot_resolution = 50
+    self.step_size_microm = 10000 # will change with user input in spinbox
+    # set robot resolution to 500 micrometers (0.5mm)
+    self.robot_resolution = 500
     self.scaling_factor = 0
     self.pixels_per_micrometer = 0
     self.corners = []
@@ -171,6 +223,11 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     self.aruco_center_pixels = []
     self.aruco_corner_x_dist = 20
     self.aruco_corner_y_dist = 18
+    self.genFidIndex = 0
+    self.testFidIndex = 0
+    self.scan_microm_slide_coord = []
+    self.vtk_linear_transform_mtx = []
+    self.corners_img = []
 
 
 
@@ -193,6 +250,12 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     self.new_camera_mtx = new_camera_mtx
 
   def takePicture(self):
+    image = slicer.util.array("Image_Image")
+    image = image[0]
+    image = self.undistort_camera(image)
+    return image
+
+  def takePicture_aruco(self):
     # get the name of the selected camera node
     #name = self.cameraInputNode
     # take screenshot of image and read it as an array & save the Aruco marker position
@@ -216,7 +279,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     print("aruco pixels",self.aruco_center_pixels)
     image = self.undistort_camera(image)
     cv2.circle(image, (self.aruco_center_pixels[0],self.aruco_center_pixels[1]), 5, (255, 0, 0), -1)
-    cv2.imwrite("C:/Users/laure/PycharmProjects/TissueScanning/center point.jpg", image)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/center point.jpg", image)
     return image
 
   def undistort_camera(self, image):
@@ -244,7 +307,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
   def convert_to_slide_coordinate(self, pixel_image_coordinates, slide_corners):
     x_image_vector = [1, 0]
     y_image_vector = [0, 1]
-    print("slide Corners:", slide_corners)
+    translation_vector = [self.corners_img[0][0] - self.corners[0][0], self.corners_img[0][1] - self.corners[0][1], 0] 
     # calculate normalized direction vectors for x and y for slide
     x_direction_vector = np.array(
       [slide_corners[3][0] - slide_corners[0][0], slide_corners[3][1] - slide_corners[0][1]])
@@ -264,17 +327,24 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     pixel_coordinates_matrix = np.asmatrix(pixel_image_coordinates)
     rows, _ = pixel_coordinates_matrix.shape
     # convert the matrix from 2D to 3D for transformation (z = 1)
-    z_column = np.ones((rows, 1))
-    pixel_coordinates_matrix = np.column_stack((pixel_coordinates_matrix, z_column))
+    z_column = np.zeros((rows, 1))
+    fourth_column = np.array([0,0,0,1]).reshape(4,1)
+    print(fourth_column)
+    pixel_coordinates_matrix = np.column_stack((np.column_stack((pixel_coordinates_matrix, z_column)),z_column))
     print("pixel_coordinates_matrix: \n", pixel_coordinates_matrix)
     transformation_matrix = np.array([[math.cos(theta), -1 * math.sin(theta), -1 * slide_corners[0][0]],
                                       [math.sin(theta), math.cos(theta), -1 * slide_corners[0][1]], [0, 0, 1]])
-    print("transformation Matrix: \n", transformation_matrix)
+    transformation_matrix = np.row_stack((transformation_matrix, translation_vector))
+    print("transformation Matrix after translation_vector:\n", transformation_matrix)
+    transformation_matrix = np.column_stack((transformation_matrix, fourth_column))
     pixel_slide_coordinates_3D = transformation_matrix.dot(pixel_coordinates_matrix.T).T
     print("pixel slide coordinates:", pixel_slide_coordinates_3D)
     # remove z column before returning pixel_slide_coordinates to make coordinates 2D
-    pixel_slide_coordinates_2D = np.delete(pixel_slide_coordinates_3D, 2, axis=1)
+    pixel_slide_coordinates_2D = np.delete(pixel_slide_coordinates_3D, 2, axis=1) # delete z axis
+    pixel_slide_coordinates_2D = np.delete(pixel_slide_coordinates_2D, 2, axis=1) # delete extra 4th column
     print("pixel slide coordinates:", pixel_slide_coordinates_2D)
+    
+
     return pixel_slide_coordinates_2D
 
   def imaging(self, input_contour_mask, input_tissue_height, input_tissue_width, pixelsPerMetric, step_size, x_top_left,
@@ -292,7 +362,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     step = 0
 
     # create a grid mask image for the lines to be printed on
-    line_mask = np.zeros(input_contour_mask.shape, np.float32)
+    line_mask = np.zeros(input_contour_mask.shape, np.uint8)
 
     # calculate and draw the horizontal lines onto the mask image
     while step <= num_step:
@@ -306,13 +376,14 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
       cv2.line(line_mask, horiz_left_point, horiz_right_point, (255, 255, 255), 1, cv2.LINE_AA)
       step += 1
     # cv2.imshow('mask', line_mask)
-    cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/line_mask.jpg', line_mask)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/line_mask.jpg', line_mask)
     # use numpy.logical_and to determine the pixels where the lines intersect the contour mask
     imaging_rows = cv2.bitwise_and(line_mask, input_contour_mask)
-    # imaging_rows = cv2.cvtColor(imaging_rows, cv2.COLOR_BGR2GRAY)
+    imaging_rows = np.uint8(imaging_rows)
+    #imaging_rows = cv2.cvtColor(imaging_rows, cv2.COLOR_BGR2GRAY)
     print(imaging_rows.shape)
     # cv2.imshow('contour lines', imaging_rows)
-    cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/contour_lines.jpg', imaging_rows)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/contour_lines.jpg', imaging_rows)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
 
@@ -348,7 +419,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
   def create_contour_mask(self, img, cnts):
     # create the mask image with all zeros
-    mask = np.zeros(img.shape, dtype=np.float32)
+    mask = np.zeros(img.shape, dtype=np.uint8)
     # draw the contour points onto the mask image & fill it in
     cv2.drawContours(mask, [cnts], 0, (255, 255, 255), -1)
     # find the points within the contour
@@ -370,7 +441,60 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     rotation_matrix = np.array(np.hstack([norm_camera_aruco_x, norm_camera_aruco_y, norm_camera_aruco_z]))
     return rotation_matrix
 
+  def create_contour_mask(self, img, cnts):
+    # create the mask image with all zeros
+    mask = np.zeros(img.shape, dtype=np.uint8)
+    # draw the contour points onto the mask image & fill it in
+    cv2.drawContours(mask, [cnts], 0, (255, 255, 255), -1)
+    # find the points within the contour
+    #pixelpoints = cv2.findNonZero(mask)
+    #cv2.imshow('mask', mask)
+    return mask
 
+  def find_corners(self, input_image, input_contours):
+    height, width, _ = input_image.shape
+    bw_input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
+    image_area = height*width
+    corners_image = input_image.copy()
+    # search for the slide contour through the list of contours
+    for contour in input_contours:
+        size = cv2.contourArea(contour)
+        # if the contour is of reasonable size (the slide contour) then create a mask
+        if size > image_area/10:
+            mask = self.create_contour_mask(bw_input_image, contour)
+    #cv2.imshow('contours mask', mask)
+    # find all non-zero points in the form [x,y] (column, row)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/tissue_mask.jpg", mask)
+    slide_points = cv2.findNonZero(mask)
+    # convert the points into a matrix to do matrix multiplication
+    matrix_slide_pts = np.asmatrix(slide_points)
+    # 4 corners will be: min(x+y), min(-x-y), min(x-y), min(-x+y)
+    # build an array with the correct + and - signs for multiplication
+    multi_matrix = np.array([[1, -1, 1, -1], [1, -1, -1, 1]])
+    # multiply the slide pts matrix to the multi_matrix
+    result = matrix_slide_pts.dot(multi_matrix)
+    # find the row index of the min value in each column in the result matrix
+    # column 1 is top left, column 2 is bottom right, column 3 is bottom left, column 4 is top right
+    indexes = []
+    for column in range(result.shape[1]):
+        indexes.append(np.argmin(result[:, column]))
+
+    # find the corresponding (x,y) coordinates for each min value index
+    points = []
+    for index in indexes:
+        points.append(slide_points[index][0])
+
+    # plot the found points onto the mask image
+    for point in points:
+        cv2.circle(corners_image, (point[0], point[1]), 5, (0, 255, 255), -1)
+
+    #cv2.imshow('mask w/ corners', input_image)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/calculated_corners.jpg', corners_image)
+    #cv2.waitKey()
+    #cv2.destroyAllWindows()
+    return np.asarray(points)
+
+# NOT USED ANYMORE
   def find_slide_corners(self, input_image):
     top_right_relative_aruco = [self.aruco_corner_x_dist, -1*self.aruco_corner_y_dist, 0, 1]
     top_left_relative_aruco = [self.aruco_corner_x_dist, -1*(self.aruco_corner_y_dist + self.slide_mm_width), 0, 1]
@@ -396,7 +520,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     cv2.circle(input_image, (top_right_pixels[0], top_right_pixels[1]), 5, (0, 255, 0), -1)
     cv2.circle(input_image, (bottom_left_pixels[0], bottom_left_pixels[1]), 5, (0, 0, 255), -1)
     cv2.circle(input_image, (bottom_right_pixels[0], bottom_right_pixels[1]), 5, (0, 255, 255), -1)
-    cv2.imwrite("C:/Users/laure/PycharmProjects/TissueScanning/center point.jpg", input_image)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/center point.jpg", input_image)
     return np.array([top_left_pixels.reshape(1,3), bottom_right_pixels.reshape(1,3), bottom_left_pixels.reshape(1,3), top_right_pixels.reshape(1,3)])
 
   def find_tissue_contour(self, slide_width, slide_height, slide_threshold, pixels_per_micrometer):
@@ -407,16 +531,22 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     # calculate the area of the slide
     slide_area = slide_width * slide_height
     # threshold the slide image
-    tissue_contours, hierarchy = cv2.findContours(slide_threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    _, tissue_contours, hierarchy = cv2.findContours(slide_threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    print("tissue_contours", tissue_contours[0][0])
     for contour in tissue_contours:
+      image = self.crop_img.copy()
+      print "entering for loop"
       # check if contour is touching the border of the image (tissue will not be placed on edge of slide)
       bounding_x, bounding_y, bounding_width, bounding_height = cv2.boundingRect(contour)
-      if bounding_x >= 0 and bounding_y >= 0 and bounding_x + bounding_width <= width - 1 and bounding_y + bounding_height <= height - 1:
+      if bounding_x >= 0 and bounding_y >= 0 and bounding_x + bounding_width <= width - 5 and bounding_y + bounding_height <= height - 5:
+        print("entering bounding box if statement")
         # check that the area of the contour is greater than 750000 micrometers and less than 375000000 micrometers
         if (slide_area * 0.004) / pixels_per_micrometer < cv2.contourArea(contour) / pixels_per_micrometer:
-          print("Slide Area:", (slide_area * 0.004) / pixels_per_micrometer)
-          print("contour area in micrometers:", cv2.contourArea(contour) / pixels_per_micrometer)
-          # cv2.drawContours(crop_img_copy, contour, -1, (0, 255, 255), 2)
+          #cv2.rectangle(image, (bounding_x, bounding_y), (bounding_x + bounding_width, bounding_y + bounding_height), (2,255,0),2)
+          #cv2.drawContours(image, contour, -1, (0, 255, 255), 2)
+          #cv2.imshow("rectangle", image)
+          #cv2.waitKey()
+          #cv2.destroyAllWindows()
           # print(cv2.contourArea(contour))
           tissue_contour = contour
           return tissue_contour
@@ -463,6 +593,46 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
           new_image[y, x, color] = np.clip(contrast * image[y, x, color] + brightness, 0, 255)
     return new_image
 
+  def fiducialMarker(self, xcoordinate, ycoordinate, zcoordinate):
+    self.fiducialNode = slicer.vtkMRMLMarkupsFiducialNode()
+    slicer.mrmlScene.AddNode(self.fiducialNode)
+    self.fiducialNode.SetName("")
+    self.fiducialNode.SetNthFiducialLabel(0, "")
+    self.fiducialNode.AddFiducial(xcoordinate, ycoordinate, zcoordinate)
+
+  def addToCurrentFiducialNode(self, xcoordinate, ycoordinate, zcoordinate):
+    self.fiducialNode.AddFiducial(xcoordinate, ycoordinate, zcoordinate)
+    #self.fiducialNode.SetNthFiducialLabel(self.genFidIndex, "")
+    self.genFidIndex= self.genFidIndex + 1
+
+  def convert_array_to_fiducials(self):
+    linear_transform_node = slicer.util.getNode("LinearTransform_3")
+    vtk_linear_transform_mtx = vtk.vtkMatrix4x4()
+    linear_transform_node.GetMatrixTransformToParent(vtk_linear_transform_mtx)
+    print(vtk_linear_transform_mtx)
+    self.vtk_linear_transform_mtx = vtk_linear_transform_mtx
+    pts = np.load(r"C:\Users\lconnolly\Desktop\use_this_tissue_scanning\contour points.npy")
+    #pts = np.divide(pts, 1000)
+    #pts = self.scan_microm_slide_coord
+    transformed_pts = []
+    #print("outside for loop")
+    #print(pts)
+    for i in range(0,len(pts)-1):
+      
+      pt_4x1 = np.array([pts[i][0], pts[i][1], 0, 1]).reshape(4,1)
+      new_pt = np.array(self.vtk_linear_transform_mtx.MultiplyPoint(pt_4x1))
+      #print(new_pt[0:2])
+      #np.append(transformed_pts, new_pt)
+      #transformed_pts[i] = new_pt
+      #print(transformed_pts[i])
+      transformed_pts.append(new_pt[0:2])
+    transformed_np_pts = np.asarray(transformed_pts)
+    #print(transformed_pts)
+    print("transformed Points:", transformed_np_pts)
+    np.save(r"C:/Users/lconnolly/Desktop/use_this_tissue_scanning/transformed pts.npy", transformed_np_pts)
+
+    
+
   def calc_cropped_corners(self, corner_points):
     top_x = np.amin(corner_points[:, 0])
     bottom_x = np.amax(corner_points[:, 0])
@@ -483,25 +653,26 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
     # covert image to greyscale
     img = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite("C:/Users/15ly1/PycharmProjects/TissueScanning/image_black_and_white.jpg", img)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/image_black_and_white.jpg", img)
     # cv2.imshow('image', img)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
 
     # calculate the threshold
     _, threshold = cv2.threshold(img, 1, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    cv2.imwrite("C:/Users/15ly1/PycharmProjects/TissueScanning/image_threshold.jpg", threshold)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/image_threshold.jpg", threshold)
 
     # cv2.imshow('threshold',threshold)
     # cv2.imshow('inv_threshold',inv_threshold)
 
     # Find contour of the tissue slide
-    contours, hierarchy = cv2.findContours(threshold, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    _, contours, hierarchy = cv2.findContours(threshold, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     # Draw contours onto display image
     contours_copy = self.image.copy()
 
     # calculate the corners of the slide
-    self.corners = self.find_slide_corners(contours_copy)
+    self.corners = self.find_corners(contours_copy, contours)
+    #self.corners = self.find_slide_corners(contours_copy)
     print(self.corners)
     self.corners = np.vstack(self.corners).squeeze()
     print(self.corners)
@@ -513,15 +684,15 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     micrometer_per_pixel = (micrometer_per_pixel_width + micrometer_per_pixel_height) / 2
     print("Micrometer per pixel:", micrometer_per_pixel)
     print("robot_resolution/micrometer_per_pixel", (micrometer_per_pixel / self.robot_resolution))
-    self.scaling_factor = (micrometer_per_pixel / self.robot_resolution) * 2
+    self.scaling_factor = (micrometer_per_pixel / self.robot_resolution) #* 2
     print("scaling_factor: ", self.scaling_factor)
 
     # crop the photo to size of the slide using the min and max x and y corner points
-    print(np.min(self.corners[:, 1]))
-    print((self.corners[:, 1]))
-    self.crop_img = self.image[math.floor(np.min(self.corners[:, 1])):math.ceil(np.amax(self.corners[:, 1])),
-                    math.floor(np.amin(self.corners[:, 0])):math.ceil(np.amax(self.corners[:, 0]))]
-    cv2.imwrite("C:/Users/15ly1/PycharmProjects/TissueScanning/cropped_image.jpg", self.crop_img)
+    print("np min column 1", math.floor(np.min(self.corners[:, 1])))
+    print("np max column 1", math.ceil(np.max(self.corners[:,1])))
+    self.crop_img = self.image[int(math.floor(np.min(self.corners[:, 1]))):int(math.ceil(np.amax(self.corners[:, 1]))),
+                    int(math.floor(np.amin(self.corners[:, 0]))):int(math.ceil(np.amax(self.corners[:, 0])))]
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/cropped_image.jpg", self.crop_img)
 
     # increase contrast of image to brighten tissue sample
     #crop_img_contrast = self.correct_contrast_brightness(crop_img, 2, 0)
@@ -531,7 +702,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     grey_crop = cv2.cvtColor(self.crop_img, cv2.COLOR_BGR2GRAY)
 
     # cv2.imshow('cropped image',grey_crop)
-    cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/cropped_image_grey.jpg', grey_crop)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/cropped_image_grey.jpg', grey_crop)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
     #
@@ -539,16 +710,27 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     _, slide_threshold = cv2.threshold(grey_crop, 130, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # cv2.drawContours(crop_img, contours, -1, (0, 0, 255), 2)
-    cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/slide_threshold.jpg', slide_threshold)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/slide_threshold.jpg', slide_threshold)
 
     # upscale image for better mm to pixel accuracy
     slide_threshold = cv2.resize(slide_threshold, (0, 0), fx=self.scaling_factor, fy=self.scaling_factor)
 
     # upscale the corners points by the same scaling factor
-    self.corners = self.corners * self.scaling_factor
+    self.corners_img = self.corners * self.scaling_factor
 
     # convert corner points to fit in the cropped image
-    self.corners = self.calc_cropped_corners(self.corners)
+    self.corners = self.calc_cropped_corners(self.corners_img)
+    print(self.corners)
+
+  ## Fiducial node generation
+    #self.dataCollection = self.createPolyDataPoint(self.xcoordinate, self.ycoordinate, self.zcoordinate)
+    self.fiducialMarker(self.corners[0][0], self.corners[0][1], 0)
+    self.genFidIndex= self.genFidIndex + 1
+    self.addToCurrentFiducialNode(self.corners[1][0], self.corners[1][1], 0)
+    self.addToCurrentFiducialNode(self.corners[2][0], self.corners[2][1], 0)
+    self.addToCurrentFiducialNode(self.corners[3][0], self.corners[3][1], 0)
+    
+
 
     # calculate the size of the slide in pixels (height and width)
     slide_pixel_height, slide_pixel_width = self.calc_slide_size_pixels(self.corners)
@@ -562,19 +744,19 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
           ((self.slide_microm_height / slide_pixel_height) + (self.slide_microm_width / slide_pixel_width)) / 2)
 
     # find the contour of the tissue on the slide
-    self.tissue_contour = self.find_tissue_contour(slide_pixel_width, slide_pixel_height, slide_threshold,
-                                              self.pixels_per_micrometer)
+    self.tissue_contour = self.find_tissue_contour(slide_pixel_width, slide_pixel_height, slide_threshold, self.pixels_per_micrometer)
+    print("tissue_contour_found")
     tissue_contour_image = cv2.resize(self.crop_img.copy(), (0, 0), fx=self.scaling_factor, fy=self.scaling_factor)
     cv2.drawContours(tissue_contour_image, self.tissue_contour, -1, (0, 255, 255), 5)
     cv2.imshow("tissue_contour", tissue_contour_image)
     print("tissue contour:", self.tissue_contour)
-    cv2.imwrite("C:/Users/15ly1/PycharmProjects/TissueScanning/tissue_contour.jpg", tissue_contour_image)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/tissue_contour.jpg", tissue_contour_image)
 
     # generate a mask of the tissue contour
     self.tissue_mask = self.create_contour_mask(slide_threshold, self.tissue_contour)
 
     # cv2.imshow('tissue_mask', tissue_mask)
-    cv2.imwrite('C:/Users/15ly1/PycharmProjects/TissueScanning/tissue_mask.jpg', self.tissue_mask)
+    cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/tissue_mask.jpg', self.tissue_mask)
 
 
   def generate_scanning_pattern(self):
@@ -591,14 +773,15 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
       cv2.circle(grid_vs_contour_lines, tuple(grid_point), 1, (0, 0, 255))
     for contour_point in scan_pixel_img_coord:
       cv2.circle(grid_vs_contour_lines, tuple(contour_point), 1, (0, 255, 0))
-    cv2.imwrite("C:/Users/15ly1/PycharmProjects/TissueScanning/resulting_points.jpg", grid_vs_contour_lines)
+    cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/resulting_points.jpg", grid_vs_contour_lines)
     cv2.imshow("grid vs contour lines", grid_vs_contour_lines)
     # convert from image coordinate system to slide coordinate system
-    scan_pixel_slide_coord = self.convert_to_slide_coordinate(scan_pixel_img_coord, self.corners)
-    print("scan_pixel_img_coord:", scan_pixel_img_coord)
-    print("scan_pixel_slide_coord:", scan_pixel_slide_coord)
+    #scan_pixel_slide_coord = self.convert_to_slide_coordinate(scan_pixel_img_coord, self.corners)
+    #print("scan_pixel_img_coord:", scan_pixel_img_coord)
+    #print("scan_pixel_slide_coord:", scan_pixel_slide_coord)
     # convert from pixels to micrometers (divide the pixel coordinates matrix by pixels_per_micrometer conversion to find micrometers)
-    scan_microm_slide_coord = np.divide(scan_pixel_slide_coord, self.pixels_per_micrometer)
+    #self.scan_microm_slide_coord = np.divide(scan_pixel_slide_coord, self.pixels_per_micrometer)
+    np.save(r"C:/Users/lconnolly/Desktop/use_this_tissue_scanning/contour points.npy", scan_pixel_img_coord)
 
     # calculate the size of scan pixels and grid pixels to calculate percentage change/difference
     contour_pixel_lines_rows = scan_pixel_img_coord.shape[0]
