@@ -123,12 +123,12 @@ class Tissue_Scanning_ModuleWidget(ScriptedLoadableModuleWidget):
 
     self.contourButton = qt.QPushButton("Determine Tissue Contour")
     self.contourButton.connect('clicked(bool)', self.onContourButton)
-    self.contourButton.enabled = False
+    self.contourButton.enabled = True
     CameraControlFormLayout.addRow(self.contourButton)
   
     self.scanningButton = qt.QPushButton("Generate Scanning Pattern")
     self.scanningButton.connect('clicked(bool)', self.onScanningButton)
-    self.scanningButton.enabled = False
+    self.scanningButton.enabled = True
     CameraControlFormLayout.addRow(self.scanningButton)
 
     self.testButton = qt.QPushButton("Gnew button")
@@ -213,7 +213,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     # set the step size to 50 micrometers
     self.step_size_microm = 10000 # will change with user input in spinbox
     # set robot resolution to 500 micrometers (0.5mm)
-    self.robot_resolution = 500
+    self.robot_resolution = 50
     self.scaling_factor = 0
     self.pixels_per_micrometer = 0
     self.corners = []
@@ -357,24 +357,32 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     print("Pixels per step:", pixels_per_step)
     # num_step = round((input_tissue_height/pixelsPerMetric)/step_size)
     print("input tissue height: ", input_tissue_height)
-    num_step = round(input_tissue_height / pixels_per_step)
-    print("number of steps:", num_step)
-    step = 0
+    y_num_step = round(input_tissue_height / pixels_per_step)
+    x_num_step = round(input_tissue_width / pixels_per_step)
+    print("number of y steps:", y_num_step)
+    print("number of x steps:", x_num_step)
+    y_step = 0
 
     # create a grid mask image for the lines to be printed on
     line_mask = np.zeros(input_contour_mask.shape, np.uint8)
-
     # calculate and draw the horizontal lines onto the mask image
-    while step <= num_step:
+    while y_step <= y_num_step:
+      x_step = 0
       # calculate the points for the horizontal line moving vertically down the image
-      horiz_left_point = (int(x_top_left), int(y_top_left + (step * pixels_per_step)))
-      horiz_right_point = (int(x_top_left + input_tissue_width), int(y_top_left + (step * pixels_per_step)))
+      y_axis = int(y_top_left + (y_step*pixels_per_step))
+      while x_step <= x_num_step:
+        x_axis = int(x_top_left + (x_step*pixels_per_step))
+        point = tuple([x_axis, y_axis])
+        cv2.circle(line_mask, point, 0, (255,255,255), -1)
+        x_step += 1
+      #horiz_left_point = (int(x_top_left), int(y_top_left + (step * pixels_per_step)))
+      #horiz_right_point = (int(x_top_left + input_tissue_width), int(y_top_left + (step * pixels_per_step)))
 
       # print the points onto the image & plot the line
       # cv2.circle(line_mask, horiz_left_point, 5, (0,0,0), -1)
       # cv2.circle(line_mask, horiz_right_point, 5, (0,0,0), -1)
-      cv2.line(line_mask, horiz_left_point, horiz_right_point, (255, 255, 255), 1, cv2.LINE_AA)
-      step += 1
+      #cv2.line(line_mask, horiz_left_point, horiz_right_point, (255, 255, 255), 1, cv2.LINE_AA)
+      y_step += 1
     # cv2.imshow('mask', line_mask)
     cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/line_mask.jpg', line_mask)
     # use numpy.logical_and to determine the pixels where the lines intersect the contour mask
@@ -389,6 +397,9 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
     # find the pixel locations of the contour scanning pattern
     contour_pixel_lines = cv2.findNonZero(imaging_rows)
+    #print("contour_pixel_lines:", contour_pixel_lines)
+    print("contour pixel lines (first 6):", contour_pixel_lines[0:6])
+
 
     # find the pixel locations of the grid scanning pattern
     grid_pixel_lines = cv2.findNonZero(line_mask)
@@ -486,7 +497,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
 
     # plot the found points onto the mask image
     for point in points:
-        cv2.circle(corners_image, (point[0], point[1]), 5, (0, 255, 255), -1)
+        cv2.circle(corners_image, (point[0], point[1]), 3, (0, 255, 255), -1)
 
     #cv2.imshow('mask w/ corners', input_image)
     cv2.imwrite('C:/Users/lconnolly/Desktop/use_this_tissue_scanning/calculated_corners.jpg', corners_image)
@@ -652,6 +663,8 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     print("contour determination started")
 
     # covert image to greyscale
+    
+    #self.image = cv2.imread(r"C:\Users\lconnolly\Desktop\use_this_tissue_scanning\image_black_and_white.jpg")
     img = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
     cv2.imwrite("C:/Users/lconnolly/Desktop/use_this_tissue_scanning/image_black_and_white.jpg", img)
     # cv2.imshow('image', img)
@@ -684,7 +697,7 @@ class Tissue_Scanning_ModuleLogic(ScriptedLoadableModuleLogic):
     micrometer_per_pixel = (micrometer_per_pixel_width + micrometer_per_pixel_height) / 2
     print("Micrometer per pixel:", micrometer_per_pixel)
     print("robot_resolution/micrometer_per_pixel", (micrometer_per_pixel / self.robot_resolution))
-    self.scaling_factor = (micrometer_per_pixel / self.robot_resolution) #* 2
+    self.scaling_factor = (micrometer_per_pixel / self.robot_resolution) * 2
     print("scaling_factor: ", self.scaling_factor)
 
     # crop the photo to size of the slide using the min and max x and y corner points
